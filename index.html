@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pro-Visualizer v2.0</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        background-color: #050505;
+        color: #00ff41;
+        font-family: 'Courier New', Courier, monospace;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        overflow: hidden;
+      }
+
+      #drop-zone {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 2px dashed #00ff4133;
+        z-index: 5;
+      }
+
+      canvas {
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+
+      .controls {
+        position: absolute;
+        bottom: 30px;
+        z-index: 20;
+        display: flex;
+        gap: 15px;
+        background: rgba(0, 0, 0, 0.7);
+        padding: 15px;
+        border: 1px solid #00ff41;
+        border-radius: 4px;
+      }
+
+      button {
+        background: transparent;
+        color: #00ff41;
+        border: 1px solid #00ff41;
+        padding: 8px 16px;
+        cursor: pointer;
+        font-family: inherit;
+        text-transform: uppercase;
+        transition: 0.2s;
+      }
+
+      button:hover {
+        background: #00ff41;
+        color: #050505;
+      }
+
+      .hidden {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="drop-zone">
+      <div id="instructions">
+        <h1>OSCILLOSCOPE v2.0</h1>
+        <p>DRAG & DROP AUDIO FILE</p>
+      </div>
+    </div>
+
+    <canvas id="scope"></canvas>
+
+    <div class="controls">
+      <button id="btn-play">Pause</button>
+      <button id="btn-mode">Switch to Circular</button>
+    </div>
+
+    <script>
+      const canvas = document.getElementById('scope');
+      const ctx = canvas.getContext('2d');
+      const dropZone = document.getElementById('drop-zone');
+      const playBtn = document.getElementById('btn-play');
+      const modeBtn = document.getElementById('btn-mode');
+
+      let audioCtx, analyser, source, dataArray, animationId;
+      let isCircular = false;
+
+      function resize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+      }
+      window.addEventListener('resize', resize);
+      resize();
+
+      // Control Logic
+      playBtn.addEventListener('click', () => {
+        if (!audioCtx) return;
+        if (audioCtx.state === 'running') {
+          audioCtx.suspend();
+          playBtn.innerText = 'Resume';
+        } else {
+          audioCtx.resume();
+          playBtn.innerText = 'Pause';
+        }
+      });
+
+      modeBtn.addEventListener('click', () => {
+        isCircular = !isCircular;
+        modeBtn.innerText = isCircular
+          ? 'Switch to Linear'
+          : 'Switch to Circular';
+      });
+
+      // Drag and Drop
+      dropZone.addEventListener('dragover', (e) => e.preventDefault());
+      dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        const file = e.dataTransfer.files[0];
+        if (file && file.type.startsWith('audio/')) {
+          handleFile(file);
+          document.getElementById('instructions').classList.add('hidden');
+        }
+      });
+
+      async function handleFile(file) {
+        if (audioCtx) audioCtx.close();
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+        const arrayBuffer = await file.arrayBuffer();
+        const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+
+        source = audioCtx.createBufferSource();
+        source.buffer = audioBuffer;
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 2048;
+
+        source.connect(analyser);
+        analyser.connect(audioCtx.destination);
+
+        dataArray = new Uint8Array(analyser.frequencyBinCount);
+        source.start();
+        playBtn.innerText = 'Pause';
+        draw();
+      }
+
+      function draw() {
+        animationId = requestAnimationFrame(draw);
+        analyser.getByteTimeDomainData(dataArray);
+
+        ctx.fillStyle = 'rgba(5, 5, 5, 0.15)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = '#00ff41';
+        ctx.shadowBlur = 8;
+        ctx.shadowColor = '#00ff41';
+
+        if (isCircular) {
+          drawCircular();
+        } else {
+          drawLinear();
+        }
+        ctx.shadowBlur = 0;
+      }
+
+      function drawLinear() {
+        ctx.beginPath();
+        const sliceWidth = canvas.width / dataArray.length;
+        let x = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+          const v = dataArray[i] / 128.0;
+          const y = (v * canvas.height) / 2;
+          i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+          x += sliceWidth;
+        }
+        ctx.stroke();
+      }
+
+      function drawCircular() {
+        const centerX = canvas.width / 2;
+        const centerY = canvas.height / 2;
+        const radius = Math.min(centerX, centerY) * 0.5;
+
+        ctx.beginPath();
+        for (let i = 0; i < dataArray.length; i++) {
+          const angle = (i / dataArray.length) * Math.PI * 2;
+          const amplitude = dataArray[i] / 128.0;
+
+          // The math for circular projection:
+          const r = radius * amplitude;
+          const x = centerX + r * Math.cos(angle);
+          const y = centerY + r * Math.sin(angle);
+
+          i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+        ctx.stroke();
+      }
+    </script>
+  </body>
+</html>
